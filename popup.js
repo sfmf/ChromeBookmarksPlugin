@@ -4,8 +4,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let openFolders = [];
   let savedScrollTop = 0;
+  let faviconCache = {};
 
-  chrome.storage.local.get(['popupWidth', 'popupHeight', 'searchText', 'openFolders', 'scrollTop'], (data) => {
+  chrome.storage.local.get(['popupWidth', 'popupHeight', 'searchText', 'openFolders', 'scrollTop', 'faviconCache'], (data) => {
     document.documentElement.style.width = (data.popupWidth || 360) + 'px';
     document.documentElement.style.height = (data.popupHeight || 500) + 'px';
     document.body.style.width = (data.popupWidth || 360) + 'px';
@@ -15,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     openFolders = data.openFolders || [];
     savedScrollTop = data.scrollTop || 0;
+    faviconCache = data.faviconCache || {};
     loadBookmarks(data.searchText || '');
   });
 
@@ -68,6 +70,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function getFaviconKey(url) {
+    try {
+      const u = new URL(url);
+      return u.hostname;
+    } catch {
+      return '';
+    }
+  }
+
   function renderTree(nodes, parentEl, depth = 0, autoOpen = false) {
     for (const node of nodes) {
       if (node.url) {
@@ -77,19 +88,46 @@ document.addEventListener('DOMContentLoaded', () => {
         item.target = '_blank';
         item.style.paddingLeft = `${12 + depth * 16}px`;
 
-        let faviconSrc = 'icons/default.png';
-        try {
-          const u = new URL(node.url);
-          if (u.origin) {
-            faviconSrc = `${u.origin}/favicon.ico`;
-          }
-        } catch {}
+        const key = getFaviconKey(node.url);
+        const cached = key ? faviconCache[key] : null;
 
         const img = document.createElement('img');
         img.className = 'favicon';
-        img.src = faviconSrc;
         img.alt = '';
-        img.onerror = () => { img.src = 'icons/default.png'; };
+
+        if (cached) {
+          img.src = cached;
+        } else {
+          let faviconSrc = '';
+          try {
+            const u = new URL(node.url);
+            if (u.origin) {
+              faviconSrc = `${u.origin}/favicon.ico`;
+            }
+          } catch {}
+
+          if (faviconSrc) {
+            img.src = faviconSrc;
+            img.onload = () => {
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16;
+                canvas.height = 16;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 16, 16);
+                faviconCache[key] = canvas.toDataURL();
+                chrome.storage.local.set({ faviconCache });
+              } catch {}
+            };
+            img.onerror = () => {
+              img.src = 'icons/default.png';
+              faviconCache[key] = 'icons/default.png';
+              chrome.storage.local.set({ faviconCache });
+            };
+          } else {
+            img.src = 'icons/default.png';
+          }
+        }
 
         const title = document.createElement('span');
         title.className = 'title';
